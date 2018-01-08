@@ -73,7 +73,6 @@ public class Activator extends AbstractUIPlugin {
 				@Override
 				public void resourceChanged(IResourceChangeEvent event) {
 					if (System.currentTimeMillis() - lastChanged < hookInterval) {
-						System.out.println("更新早すぎ");
 						lastChanged = System.currentTimeMillis();
 						return ;
 					}
