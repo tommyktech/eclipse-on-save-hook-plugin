@@ -8,10 +8,14 @@ This plug-in can execute your commands when you save (including change, create, 
 1. Install this archive file according to the instruction below: 
 
 *Select the archive file:*
+
 ![eclipse-plugin-installation](https://user-images.githubusercontent.com/13780300/34488010-155e8e50-f01a-11e7-81ab-a4782675ab41.png)
 
+
 *Progress installation procedures as usual:*
+
 ![eclipse-plugin-installation2](https://user-images.githubusercontent.com/13780300/34488049-3d1969b0-f01a-11e7-8e5f-255ea64eafa4.png)
+
 
 4. Restart your Eclipse IDE.
 
