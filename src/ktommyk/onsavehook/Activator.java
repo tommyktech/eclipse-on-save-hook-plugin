@@ -13,6 +13,7 @@ import org.osgi.framework.BundleContext;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -22,6 +23,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Properties;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.regex.Pattern;
 
 import org.eclipse.core.resources.*;
@@ -47,158 +50,202 @@ public class Activator extends AbstractUIPlugin {
 	private HashMap<String, Long> confFiles = new HashMap<String, Long>();
 	
 	// configuration file name of each project
-	private String conf_file_name = "on_save_hook.conf";
-	
-	private MessageConsoleStream infoConsole;
-	private MessageConsoleStream warnConsole;
-	private MessageConsoleStream errorConsole;
+	private String confFileName = "on_save_hook.conf";
+	private int hookInterval = 1000;
 	
     final static Color WARN_COLOR  = new Color(null, 255, 120, 0); 
     final static Color ERROR_COLOR = new Color(null, 255, 0, 0); 
+    
+	private static ExecutorService executor;
+	private static long lastChanged = 0;
+	static {
+		executor = Executors.newSingleThreadExecutor();
+	}
 	
 	/**
 	 * The constructor
 	 */
 	public Activator() {
-		// create a console instance for output logs
-	    MessageConsole myConsole = findConsole("");
-	    infoConsole  = myConsole.newMessageStream();
-	    warnConsole  = myConsole.newMessageStream();
-	    errorConsole = myConsole.newMessageStream();
-	    warnConsole.setColor(WARN_COLOR);
-	    errorConsole.setColor(ERROR_COLOR);
-	    
 		loadGlobalConfig();
 		loadConfigs();
 		try {
 			IResourceChangeListener rcl = new IResourceChangeListener() {
 				@Override
 				public void resourceChanged(IResourceChangeEvent event) {
-					// reload config
-					loadConfigs();
-			        IResourceDelta rootDelta = event.getDelta();
+					if (System.currentTimeMillis() - lastChanged < hookInterval) {
+						System.out.println("更新早すぎ");
+						lastChanged = System.currentTimeMillis();
+						return ;
+					}
+					lastChanged = System.currentTimeMillis();
+					
+					Runnable runnable = new Runnable() {
+					    public void run() {
+							// reload config
+							loadConfigs();
+					        IResourceDelta rootDelta = event.getDelta();
+		
+					        HashMap<String, ArrayList<String>> changed = new HashMap<String, ArrayList<String>>();
+					        IResourceDeltaVisitor visitor = new IResourceDeltaVisitor() {
+					            public boolean visit(IResourceDelta delta) {
+					            	if (delta.getResource().getLocation().toFile().isDirectory()) {
+					            		return true;
+					            	}
+					               if (delta.getKind() != IResourceDelta.CHANGED
+					            		   && delta.getKind() != IResourceDelta.ADDED
+					            		   && delta.getKind() != IResourceDelta.REMOVED) {
+					            	   System.out.println("the kind is neither CHANGED nor ADDED nor REMOVED: ".concat(Integer.toString(delta.getKind())));
+					            	   System.out.println(delta.getResource().getFullPath());
+					                  return true;
+					               }
+					               
+					               IResource resource = delta.getResource();
+					               if (resource.getType() == IResource.FILE) {
+		//			            		   && "java".equalsIgnoreCase(resource.getFileExtension())) {
+					            	   String fileName = resource.getName();
+		
+					            	   String kind = "";
+					            	   if (delta.getKind() == IResourceDelta.CHANGED) {
+					            		   kind = "change";
+					            	   } else if (delta.getKind() == IResourceDelta.ADDED) {
+					            		   kind = "create";
+					            	   } else if (delta.getKind() == IResourceDelta.REMOVED) {
+					            		   kind = "remove";
+					            	   }
+					            	   
+					            	   // search for target paths
+					            	   for (String projPath : projExecMap.keySet()) {
+					            		   if (resource.getLocation().toString().indexOf(projPath) != 0) {
+					            			   continue;
+					            		   }
+					            		   if (projIncludeMap.containsKey(projPath)) {
+					            			   List<String> includeRegexList = projIncludeMap.get(projPath);
+					            			   boolean matched = false;
+					            			   for (String indcludeRegex : includeRegexList) {
+					            				   try {
+					            					   boolean res = Pattern.matches(indcludeRegex, fileName);
+						            				   if (res) {
+						            					   matched = true;
+						            					   break;
+						            				   }
+					            				   } catch (Exception e) {
+					            					   printError(getStackTraceString(e));
+					            				   }
+					            			   }
+					            			   if (matched == false) {
+					            				   continue;
+					            			   }
+					            		   }
+					            		   if (projExcludeMap.containsKey(projPath)) {
+					            			   List<String> excludeRegexList = projExcludeMap.get(projPath);
+					            			   boolean matched = false;
+					            			   for (String excludeRegex : excludeRegexList) {
+					            				   try {
+							            			   boolean res = Pattern.matches(excludeRegex, fileName);
+						            				   if (res) {
+						            					   matched = true;
+						            					   break;
+						            				   }
+					            				   } catch (Exception e) {
+					            					   printError(getStackTraceString(e));
+					            				   }
+					            			   }
+					            			   if (matched) {
+					            				   continue;
+					            			   }
+					            		   }
+					            		   
+					            		   // add this file to the changed list
+					            		   if (!changed.containsKey(projPath)) {
+					            			   changed.put(projPath, new ArrayList<String>());
+					            		   }
 
-			         HashMap<String, ArrayList<String>> changed = new HashMap<String, ArrayList<String>>();
-			         IResourceDeltaVisitor visitor = new IResourceDeltaVisitor() {
-			            public boolean visit(IResourceDelta delta) {
-			            	if (delta.getResource().getLocation().toFile().isDirectory()) {
-			            		return true;
-			            	}
-			               if (delta.getKind() != IResourceDelta.CHANGED
-			            		   && delta.getKind() != IResourceDelta.ADDED
-			            		   && delta.getKind() != IResourceDelta.REMOVED) {
-			            	   System.out.println("the kind is neither CHANGED nor ADDED nor REMOVED: ".concat(Integer.toString(delta.getKind())));
-			            	   System.out.println(delta.getResource().getFullPath());
-			                  return true;
-			               }
-			               
-			               IResource resource = delta.getResource();
-			               if (resource.getType() == IResource.FILE) {
-//			            		   && "java".equalsIgnoreCase(resource.getFileExtension())) {
-			            	   String fileName = resource.getName();
-
-			            	   String kind = "";
-			            	   if (delta.getKind() == IResourceDelta.CHANGED) {
-			            		   kind = "change";
-			            	   } else if (delta.getKind() == IResourceDelta.ADDED) {
-			            		   kind = "create";
-			            	   } else if (delta.getKind() == IResourceDelta.REMOVED) {
-			            		   kind = "remove";
-			            	   }
-			            	   
-			            	   // search for target paths
-			            	   for (String projPath : projExecMap.keySet()) {
-			            		   if (resource.getLocation().toString().indexOf(projPath) != 0) {
-			            			   continue;
-			            		   }
-			            		   if (projIncludeMap.containsKey(projPath)) {
-			            			   List<String> includeRegexList = projIncludeMap.get(projPath);
-			            			   boolean matched = false;
-			            			   for (String indcludeRegex : includeRegexList) {
-			            				   try {
-			            					   boolean res = Pattern.matches(indcludeRegex, fileName);
-				            				   if (res) {
-				            					   matched = true;
-				            					   break;
-				            				   }
-			            				   } catch (Exception e) {
-			            					   errorConsole.println(getStackTraceString(e));
-			            				   }
-			            			   }
-			            			   if (matched == false) {
-			            				   continue;
-			            			   }
-			            		   }
-			            		   if (projExcludeMap.containsKey(projPath)) {
-			            			   List<String> excludeRegexList = projExcludeMap.get(projPath);
-			            			   boolean matched = false;
-			            			   for (String excludeRegex : excludeRegexList) {
-			            				   try {
-					            			   boolean res = Pattern.matches(excludeRegex, fileName);
-				            				   if (res) {
-				            					   matched = true;
-				            					   break;
-				            				   }
-			            				   } catch (Exception e) {
-			            					   errorConsole.println(getStackTraceString(e));
-			            				   }
-			            			   }
-			            			   if (matched) {
-			            				   continue;
-			            			   }
-			            		   }
-			            		   
-			            		   // add this file to the changed list
-			            		   if (!changed.containsKey(projPath)) {
-			            			   changed.put(projPath, new ArrayList<String>());
-			            		   }
-			            		   
-			            		   infoConsole.println(kind.concat(": ").concat(resource.getFullPath().toOSString()));
-			            		   changed.get(projPath).add(kind.concat("=").concat(resource.getLocation().toOSString()));
-			            	   }
-			               }
-			               return true;
-			            }
-			         };
-			         try {
-			        	 rootDelta.accept(visitor);
-			         } catch (CoreException e) {
-			        	 errorConsole.println(getStackTraceString(e));
-			         }
-			         
-	        		 for (String projPath : changed.keySet()) {
-	        			 String execCommand = projExecMap.get(projPath);
-	        			 List<String> args = changed.get(projPath);
-	        			 args.add(0, projPath);
-	        			 args.add(0, execCommand);
-	        			 infoConsole.println("executing command: ");
-	        			 for (String arg : args) {
-	        				 infoConsole.print(arg.concat(" "));
-	        			 }
-	        			 ProcessBuilder pb = new ProcessBuilder(args);
-        				 try {
-							Process process = pb.start();
-
-							int ret = process.waitFor();
-							InputStream is = process.getInputStream();
-							printInputStream(is, infoConsole);
-							InputStream es = process.getErrorStream();
-							printInputStream(es, errorConsole);
-						} catch (IOException e) {
-				        	 errorConsole.println(getStackTraceString(e));
-						} catch (InterruptedException e) {
-				        	 errorConsole.println(getStackTraceString(e));
+		            					   printInfo(kind.concat(": ").concat(resource.getFullPath().toOSString()));
+					            		   changed.get(projPath).add(kind.concat("=").concat(resource.getLocation().toOSString()));
+					            	   }
+					               }
+					               return true;
+					            }
+					         };
+					         try {
+					        	 rootDelta.accept(visitor);
+					         } catch (CoreException e) {
+					        	 printError(getStackTraceString(e));
+					         }
+					         
+			        		 for (String projPath : changed.keySet()) {
+			        			 String execCommand = projExecMap.get(projPath);
+			        			 List<String> args = changed.get(projPath);
+			        			 args.add(0, projPath);
+			        			 args.add(0, execCommand);
+					        	 printInfo("executing command: ");
+			        			 for (String arg : args) {
+			        				 printInfo(arg.concat(" "));
+			        			 }
+			        			 ProcessBuilder pb = new ProcessBuilder(args);
+		        				 try {
+									Process process = pb.start();
+									pb.redirectErrorStream(true);
+		
+					    	        String str;
+					    	        BufferedReader brerr = new BufferedReader(new InputStreamReader(process.getInputStream()));
+					    	        try {
+					    	            while((str = brerr.readLine()) != null) {
+					    	            	printInfo(str);
+					    	            }
+					    	        } catch (IOException e) {
+							        	 printError(getStackTraceString(e));
+					    	        } finally {
+					    	            try {
+					    	                brerr.close();
+					    	            } catch (IOException e) {
+								        	 printError(getStackTraceString(e));
+					    	            }
+					    	        }
+								} catch (IOException e) {
+						        	 printError(getStackTraceString(e));
+								}
+			        		 }
 						}
-	        		 }
+			        };
+
+//			        job.setUser(true);
+//			        job.schedule();
+					executor.submit(runnable);
 				}
 			};
 			ResourcesPlugin.getWorkspace().addResourceChangeListener(rcl);
 		} catch (Exception ex) {
-			errorConsole.println(getStackTraceString(ex));
+       	 	printError(getStackTraceString(ex));
 		}
 
 	}
+
+	private void printInfo(String str) {
+	    MessageConsole console = findConsole("");
+	    MessageConsoleStream stream = console.newMessageStream();
+	    stream.println(str);
+
+		try {
+			stream.close();
+		} catch (IOException e) {
+			System.out.println("failed to close stream");
+		}
+	}
 	
+	private void printError(String str) {
+	    MessageConsole console = findConsole("");
+	    MessageConsoleStream stream = console.newMessageStream();
+	    stream.setColor(ERROR_COLOR);
+	    stream.println(str);
+		try {
+			stream.close();
+		} catch (IOException e) {
+			System.out.println("failed to close stream");
+		}
+	}
+	
+	@SuppressWarnings("unused")
 	private void printInputStream(InputStream is, MessageConsoleStream mcs) throws IOException {
 		BufferedReader br = new BufferedReader(new InputStreamReader(is));
 		try {
@@ -272,26 +319,40 @@ public class Activator extends AbstractUIPlugin {
 		}
 		
 		// read global config file 
-		String confFilePath = confDirStr.concat("on_save_hook_global.conf");
-		File   confFile     = new File(confDirStr.concat("on_save_hook_global.conf"));
+		String confFilePath = confDirStr.concat("/on_save_hook_global.conf");
+		File   confFile     = new File(confDirStr.concat("/on_save_hook_global.conf"));
 		if (confFile.exists() == false) {
 		    try {
 		    	confFile.createNewFile();
+		    	Properties prop = new Properties();
+			    try {
+			    	prop.put("conf_file_name", "on_save_hook.conf");
+			    	prop.put("hook_interval",  "1000");
+			        FileOutputStream stream = new FileOutputStream(confFile);
+			        prop.store(stream, "");
+			    } catch (IOException e) {
+			    	printError(getStackTraceString(e));
+			       	return false;
+			    }
 		    } catch (IOException e) {
-	        	 errorConsole.println(getStackTraceString(e));
-	        	 return false;
+		    	printError(getStackTraceString(e));
+	        	return false;
 		    }
 		}
     	Properties prop = new Properties();
 	    try {
 	        prop.load(new FileInputStream(confFilePath));
 	    } catch (IOException e) {
-	       	errorConsole.println(getStackTraceString(e));
+	    	printError(getStackTraceString(e));
 	       	return false;
 	    }
 	    
 	    if (prop.containsKey(("conf_file_name"))) {
-	    	this.conf_file_name = prop.getProperty("conf_file_name");
+	    	this.confFileName = prop.getProperty("conf_file_name");
+	    }
+	    
+	    if (prop.containsKey(("hook_interval"))) {
+	    	this.hookInterval = Integer.parseInt(prop.getProperty("hook_interval"));
 	    }
 	    
 		return true;
@@ -304,7 +365,7 @@ public class Activator extends AbstractUIPlugin {
 		IProject[] projects = ResourcesPlugin.getWorkspace().getRoot().getProjects();
 		for (IProject proj : projects) {
 			String projectPathStr = proj.getLocation().toString().concat("/");
-			String confFileStr = projectPathStr.concat(conf_file_name);
+			String confFileStr = projectPathStr.concat(confFileName);
 			File confFile = new File(confFileStr);
 			if (confFile.exists()) {
 				Long lastModified = confFile.lastModified();
@@ -332,7 +393,7 @@ public class Activator extends AbstractUIPlugin {
 	    	System.out.println("confFile.getAbsolutePath(): ".concat(confFile.getAbsolutePath()));
 	    	prop.load(new FileInputStream(confFile.getAbsolutePath()));
 	    } catch (IOException e) {
-	    	errorConsole.println(getStackTraceString(e));
+//	    	errorConsole.println(getStackTraceString(e));
 	    	return false;
 	    }
 	    
