@@ -23,7 +23,7 @@ This plug-in can execute your commands when you save (including change, create, 
 ## How To Configure
 You can configure this plug-in per project. 
 
-1. Create a conf file with a name `on_save_hook.conf` on top of a target project directory. 
+1. Create a conf file with a name `on_save_hook.conf` in the top directory of your target project.  
 2. In that file, you must set `exec` item at least like below: 
 `exec=C:/Users/test_user/workspace/TestProject/execute_file.bat`
 
