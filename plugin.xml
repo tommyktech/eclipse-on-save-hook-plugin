@@ -3,6 +3,8 @@
 <plugin>
    <extension
          point="org.eclipse.ui.startup">
+      <startup
+            class="ktommyk.onsavehook.Startup">
+      </startup>
    </extension>
-
 </plugin>
