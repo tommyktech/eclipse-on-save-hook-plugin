@@ -3,7 +3,7 @@
 This plug-in can execute your commands when you save (including change, create, delete) something in Eclipse. 
 
 ## How To Install
-1. Download [OnSaveHookPlugin-0.1.4.zip](https://github.com/ktommyk/eclipse-on-save-hook-plugin/releases/download/0.1/OnSaveHookPlugin-0.1.4.zip). 
+1. Download [OnSaveHookPlugin-0.1.6.zip](https://github.com/ktommyk/eclipse-on-save-hook-plugin/releases/download/0.1/OnSaveHookPlugin-0.1.6.zip). 
 1. Start Eclipse, and select `Help`->`Install New Software...` on the menu bar. 
 1. Install this archive file according to the instruction below: 
 
