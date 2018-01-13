@@ -72,6 +72,9 @@ public class Activator extends AbstractUIPlugin {
 			IResourceChangeListener rcl = new IResourceChangeListener() {
 				@Override
 				public void resourceChanged(IResourceChangeEvent event) {
+					if (ktommyk.handlers.SwitchHandler.STATUS_FLAG == false) {
+						return ;
+					}
 					if (System.currentTimeMillis() - lastChanged < hookInterval) {
 						lastChanged = System.currentTimeMillis();
 						return ;
@@ -96,6 +99,12 @@ public class Activator extends AbstractUIPlugin {
 					            	   System.out.println("the kind is neither CHANGED nor ADDED nor REMOVED: ".concat(Integer.toString(delta.getKind())));
 					            	   System.out.println(delta.getResource().getFullPath());
 					                  return true;
+					               }
+
+					               //only interested in content changes
+					               if ((delta.getFlags() & IResourceDelta.CONTENT) == 0) {
+					            	   System.out.println("not content change: delta.getFlags() ".concat(Integer.toString(delta.getFlags())));
+                                       return true;
 					               }
 					               
 					               IResource resource = delta.getResource();
